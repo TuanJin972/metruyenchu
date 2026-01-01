@@ -11,233 +11,329 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Dimensions,
+  FlatList,
+  ViewToken,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { StoryService } from '../services/storyService';
+import { ChapterCacheService } from '../services/chapterCacheService';
 import { LibraryService } from '../services/libraryService';
 import { RootStackParamList, StoredChapter, StoredStoryFile } from '../types';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 type ChapterReaderScreenProps = NativeStackScreenProps<RootStackParamList, 'ChapterReader'>;
 
-export default function ChapterReaderScreen({ navigation, route }: ChapterReaderScreenProps) {
-  const { storyName, chapterNumber } = route.params;
+interface ChapterData {
+  chapter: StoredChapter;
+  index: number;
+}
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+/**
+ * Individual chapter content component
+ * Renders the content of a single chapter with scroll support
+ */
+const ChapterContent = React.memo(({
+  pChapter,
+  pStoryName,
+  pOnScrollPositionChange,
+  pInitialScrollPosition,
+  pBottomSpacerHeight,
+}: {
+  pChapter: StoredChapter;
+  pStoryName: string;
+  pOnScrollPositionChange?: (pScrollY: number) => void;
+  pInitialScrollPosition?: number;
+  pBottomSpacerHeight: number;
+}) => {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [story, setStory] = useState<StoredStoryFile | null>(null);
-  const [chapter, setChapter] = useState<StoredChapter | null>(null);
-  const atBottomRef = useRef(false);
-  const atTopRef = useRef(false);
-  const scrollViewRef = useRef<ScrollView | null>(null);
-  const shouldScrollToBottomRef = useRef(false);
-  const bottomSpacerHeight = useMemo(() => (Dimensions.get('window').height * 1) / 2, []);
-  const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedScrollPositionRef = useRef<number>(0);
-  const shouldRestoreScrollRef = useRef(false);
-  const saveScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-
-  const loadChapter = useCallback(async () => {
-    try {
-      setLoading(true);
-
-      const savedStory = await LibraryService.getStory(storyName);
-      setStory(savedStory);
-
-      const foundChapter = savedStory.listChapter.find(ch => ch.id === chapterNumber) ?? null;
-      if (!foundChapter) {
-        throw new Error('Không tìm thấy chương trong danh sách đã lưu.');
-      }
-
-      setChapter(foundChapter);
-
-      // Check if we're returning to the same chapter (has saved scroll position)
-      const isSameChapter = savedStory.lastRead === foundChapter.id;
-      if (isSameChapter && savedStory.lastScrollPosition && savedStory.lastScrollPosition > 0) {
-        savedScrollPositionRef.current = savedStory.lastScrollPosition;
-        shouldRestoreScrollRef.current = true;
-      } else {
-        savedScrollPositionRef.current = 0;
-        shouldRestoreScrollRef.current = false;
-      }
-
-      await LibraryService.updateLastRead(storyName, foundChapter.id);
-
-      const chapterContent = await StoryService.getChapterContent(foundChapter.url);
-      setContent(chapterContent);
-    } catch (error) {
-      Alert.alert('Lỗi', error instanceof Error ? error.message : 'Không thể tải nội dung chương');
-      setContent('Không thể tải nội dung chương này.');
-      setChapter(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [chapterNumber, storyName]);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const hasRestoredScroll = useRef(false);
 
   useEffect(() => {
-    void loadChapter();
-  }, [loadChapter]);
+    let isMounted = true;
 
-  useEffect(() => {
-    shouldScrollToBottomRef.current = route.params?.startFromBottom === true;
-  }, [route.params?.startFromBottom]);
-
-  useEffect(() => {
-    return () => {
-      if (transitionTimeoutRef.current) {
-        clearTimeout(transitionTimeoutRef.current);
-        transitionTimeoutRef.current = null;
-      }
-      if (saveScrollTimeoutRef.current) {
-        clearTimeout(saveScrollTimeoutRef.current);
-        saveScrollTimeoutRef.current = null;
+    const loadContent = async () => {
+      try {
+        setLoading(true);
+        const chapterContent = await ChapterCacheService.getChapterContent(
+          pStoryName,
+          pChapter.id,
+          pChapter.url
+        );
+        if (isMounted) {
+          setContent(chapterContent);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setContent('Không thể tải nội dung chương này.');
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
-  }, []);
 
-  const getNextChapterNumber = useCallback((): number | null => {
-    if (!story) return null;
-    const currentIndex = story.listChapter.findIndex(ch => ch.id === chapterNumber);
-    if (currentIndex < 0) return null;
-    const next = story.listChapter[currentIndex + 1];
-    return next ? next.id : null;
-  }, [chapterNumber, story]);
+    void loadContent();
 
-  const getPrevChapterNumber = useCallback((): number | null => {
-    if (!story) return null;
-    const currentIndex = story.listChapter.findIndex(ch => ch.id === chapterNumber);
-    if (currentIndex <= 0) return null;
-    const prev = story.listChapter[currentIndex - 1];
-    return prev ? prev.id : null;
-  }, [chapterNumber, story]);
+    return () => {
+      isMounted = false;
+    };
+  }, [pChapter.id, pChapter.url, pStoryName]);
 
-  const hasNextChapter = useMemo(() => getNextChapterNumber() !== null, [getNextChapterNumber]);
-  const hasPrevChapter = useMemo(() => getPrevChapterNumber() !== null, [getPrevChapterNumber]);
-
-  const goNextChapter = useCallback(() => {
-    const nextChapterNumber = getNextChapterNumber();
-    if (!nextChapterNumber) {
-      Alert.alert('Thông báo', 'Bạn đã đọc đến chương cuối cùng');
-      return;
+  const handleContentSizeChange = useCallback(() => {
+    // Restore scroll position if provided and not already restored
+    if (!hasRestoredScroll.current && pInitialScrollPosition && pInitialScrollPosition > 0) {
+      requestAnimationFrame(() => {
+        scrollViewRef.current?.scrollTo({
+          y: pInitialScrollPosition,
+          animated: false,
+        });
+        hasRestoredScroll.current = true;
+      });
     }
+  }, [pInitialScrollPosition]);
 
-    navigation.replace('ChapterReader', {
-      storyName,
-      chapterNumber: nextChapterNumber,
-      startFromBottom: false,
-    });
-  }, [chapterNumber, getNextChapterNumber, navigation, storyName]);
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset } = event.nativeEvent;
+      pOnScrollPositionChange?.(contentOffset.y);
+    },
+    [pOnScrollPositionChange]
+  );
 
-  const goPrevChapter = useCallback(() => {
-    const prevChapterNumber = getPrevChapterNumber();
-    if (!prevChapterNumber) {
-      // Already at first chapter, do nothing
-      return;
+  // Pre-format content with proper paragraph spacing
+  const formattedContent = useMemo(() => {
+    if (!content) return '';
+    return content.split('\n').filter(p => p.trim()).join('\n\n');
+  }, [content]);
+
+  if (loading) {
+    return (
+      <View style={styles.chapterLoadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Đang tải...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      ref={scrollViewRef}
+      style={styles.chapterScrollView}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      bounces={false}
+      alwaysBounceVertical={false}
+      onScroll={handleScroll}
+      scrollEventThrottle={100}
+      onContentSizeChange={handleContentSizeChange}
+      nestedScrollEnabled={true}
+      removeClippedSubviews={true}
+    >
+      {/* <ImageBackground
+        source={require('../paperboard-texture.jpg')}
+        style={styles.contentBackground}
+        resizeMode="repeat"
+      > */}
+      <View style={styles.paragraphContent}>
+        <Text style={styles.contentText}>{formattedContent}</Text>
+      </View>
+      <View style={[styles.bottomSpacer, { height: pBottomSpacerHeight }]} />
+      {/* </ImageBackground> */}
+    </ScrollView>
+  );
+});
+
+export default function ChapterReaderScreen({ navigation, route }: ChapterReaderScreenProps) {
+  const { storyName, chapterNumber } = route.params;
+  const [story, setStory] = useState<StoredStoryFile | null>(null);
+  const [currentChapterIndex, setCurrentChapterIndex] = useState<number>(-1);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [savedScrollPosition, setSavedScrollPosition] = useState<number>(0);
+
+  const flatListRef = useRef<FlatList<ChapterData>>(null);
+  const saveScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedChapterRef = useRef<number>(-1);
+
+  const bottomSpacerHeight = useMemo(() => (SCREEN_HEIGHT * 1) / 2, []);
+
+  // Prepare chapter data for FlatList
+  const chapterData = useMemo((): ChapterData[] => {
+    if (!story) return [];
+    return story.listChapter.map((chapter, index) => ({
+      chapter,
+      index,
+    }));
+  }, [story]);
+
+  // Load story and initial chapter
+  useEffect(() => {
+    const loadStory = async () => {
+      try {
+        setInitialLoading(true);
+        const savedStory = await LibraryService.getStory(storyName);
+
+        const chapterIndex = savedStory.listChapter.findIndex(ch => ch.id === chapterNumber);
+        if (chapterIndex < 0) {
+          throw new Error('Không tìm thấy chương trong danh sách đã lưu.');
+        }
+
+        // Check for saved scroll position
+        const isSameChapter = savedStory.lastRead === chapterNumber;
+        if (isSameChapter && savedStory.lastScrollPosition && savedStory.lastScrollPosition > 0) {
+          setSavedScrollPosition(savedStory.lastScrollPosition);
+        }
+
+        // Preload current chapter FIRST before showing FlatList
+        const currentChapterData = savedStory.listChapter[chapterIndex];
+        await ChapterCacheService.getChapterContent(
+          storyName,
+          currentChapterData.id,
+          currentChapterData.url
+        );
+
+        // Set state after current chapter is loaded
+        setStory(savedStory);
+        setCurrentChapterIndex(chapterIndex);
+
+        // Start preloading chapters around current (background)
+        void ChapterCacheService.preloadChaptersAround(
+          storyName,
+          chapterNumber,
+          savedStory.listChapter
+        );
+      } catch (error) {
+        Alert.alert('Lỗi', error instanceof Error ? error.message : 'Không thể tải nội dung');
+        navigation.goBack();
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+
+    void loadStory();
+
+    return () => {
+      if (saveScrollTimeoutRef.current) {
+        clearTimeout(saveScrollTimeoutRef.current);
+      }
+    };
+  }, [chapterNumber, storyName, navigation]);
+
+  // Memoize initial scroll index to prevent re-renders
+  const initialScrollIndex = useMemo(() => {
+    // Only return valid index when data is ready
+    if (currentChapterIndex >= 0 && chapterData.length > 0) {
+      return currentChapterIndex;
     }
+    return undefined;
+  }, [currentChapterIndex, chapterData.length]);
 
-    navigation.replace('ChapterReader', {
-      storyName,
-      chapterNumber: prevChapterNumber,
-      startFromBottom: true,
-    });
-  }, [chapterNumber, getPrevChapterNumber, navigation, storyName]);
+  // Handle chapter change when scrolling between chapters
+  const handleViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (viewableItems.length > 0) {
+        const visibleItem = viewableItems[0];
+        const newChapterData = visibleItem.item as ChapterData;
+        const newChapterId = newChapterData.chapter.id;
 
-  // Debounced save scroll position to storage
+        // Only update if chapter actually changed
+        if (lastSavedChapterRef.current !== newChapterId) {
+          lastSavedChapterRef.current = newChapterId;
+          setCurrentChapterIndex(newChapterData.index);
+
+          // Update last read
+          void LibraryService.updateLastRead(storyName, newChapterId);
+
+          // Preload chapters around the new current chapter
+          if (story) {
+            void ChapterCacheService.preloadChaptersAround(
+              storyName,
+              newChapterId,
+              story.listChapter
+            );
+          }
+        }
+      }
+    },
+    [storyName, story]
+  );
+
+  const viewabilityConfig = useMemo(
+    () => ({
+      itemVisiblePercentThreshold: 50,
+      minimumViewTime: 100,
+    }),
+    []
+  );
+
+  // Debounced save scroll position
   const saveScrollPosition = useCallback(
     (pScrollY: number) => {
       if (saveScrollTimeoutRef.current) {
         clearTimeout(saveScrollTimeoutRef.current);
       }
       saveScrollTimeoutRef.current = setTimeout(() => {
-        saveScrollTimeoutRef.current = null;
         void LibraryService.updateScrollPosition(storyName, pScrollY);
-      }, 150); // Debounce 500ms to avoid too many writes
+      }, 300);
     },
     [storyName]
   );
 
-  const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-      const paddingToBottom = 80;
-      const paddingToTop = 20;
+  // Get current chapter info
+  const currentChapter = useMemo(() => {
+    if (!story || currentChapterIndex < 0) return null;
+    return story.listChapter[currentChapterIndex];
+  }, [story, currentChapterIndex]);
 
-      const isAtBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
-      const isAtTop = contentOffset.y <= paddingToTop;
-
-      atBottomRef.current = isAtBottom;
-      atTopRef.current = isAtTop;
-
-      if (transitionTimeoutRef.current) {
-        clearTimeout(transitionTimeoutRef.current);
-        transitionTimeoutRef.current = null;
-      }
-
-      // Save scroll position (debounced)
-      saveScrollPosition(contentOffset.y);
+  // Render individual chapter page
+  const renderChapterPage = useCallback(
+    ({ item, index }: { item: ChapterData; index: number }) => {
+      const isCurrentChapter = index === currentChapterIndex;
+      return (
+        <View style={styles.chapterPage}>
+          <ChapterContent
+            pChapter={item.chapter}
+            pStoryName={storyName}
+            pOnScrollPositionChange={isCurrentChapter ? saveScrollPosition : undefined}
+            pInitialScrollPosition={isCurrentChapter ? savedScrollPosition : undefined}
+            pBottomSpacerHeight={bottomSpacerHeight}
+          />
+        </View>
+      );
     },
-    [saveScrollPosition]
+    [currentChapterIndex, storyName, saveScrollPosition, savedScrollPosition, bottomSpacerHeight]
   );
 
-  const scheduleNavigation = useCallback((action: () => void) => {
-    if (transitionTimeoutRef.current) {
-      clearTimeout(transitionTimeoutRef.current);
-    }
-    transitionTimeoutRef.current = setTimeout(() => {
-      transitionTimeoutRef.current = null;
-      action();
-    }, 1000);
-  }, []);
+  const getItemLayout = useCallback(
+    (_: ArrayLike<ChapterData> | null | undefined, index: number) => ({
+      length: SCREEN_WIDTH,
+      offset: SCREEN_WIDTH * index,
+      index,
+    }),
+    []
+  );
 
-  const handleContentSizeChange = useCallback(() => {
-    // Priority 1: Scroll to bottom (when coming from next chapter)
-    if (shouldScrollToBottomRef.current) {
-      requestAnimationFrame(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: false });
-        shouldScrollToBottomRef.current = false;
-        shouldRestoreScrollRef.current = false;
+  const handleScrollToIndexFailed = useCallback(
+    (info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
+      // Scroll to a nearby index first, then try again
+      flatListRef.current?.scrollToIndex({
+        index: Math.max(0, info.highestMeasuredFrameIndex),
+        animated: false,
       });
-      return;
-    }
-
-    // Priority 2: Restore saved scroll position
-    if (shouldRestoreScrollRef.current && savedScrollPositionRef.current > 0) {
-      requestAnimationFrame(() => {
-        scrollViewRef.current?.scrollTo({
-          y: savedScrollPositionRef.current,
+      setTimeout(() => {
+        flatListRef.current?.scrollToIndex({
+          index: info.index,
           animated: false,
         });
-        shouldRestoreScrollRef.current = false;
-      });
-    }
-  }, []);
-
-  const handleScrollEndDrag = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-      const paddingToBottom = 80;
-      const paddingToTop = 20;
-
-      const isAtBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
-      const isAtTop = contentOffset.y <= paddingToTop;
-
-      atBottomRef.current = atBottomRef.current || isAtBottom;
-      atTopRef.current = atTopRef.current || isAtTop;
-
-      if (atBottomRef.current && hasNextChapter) {
-        scheduleNavigation(goNextChapter);
-        return;
-      }
-
-      if (atTopRef.current && hasPrevChapter) {
-        scheduleNavigation(goPrevChapter);
-        return;
-      }
+      }, 100);
     },
-    [goNextChapter, goPrevChapter, hasNextChapter, hasPrevChapter, scheduleNavigation]
+    []
   );
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -248,81 +344,67 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
 
   return (
     <SafeAreaView style={styles.container}>
-      <ImageBackground
-            source={require('../paperboard-texture.jpg')}
-            // style={styles.paragraphContainer}
-            resizeMode="repeat"
-          >
-           <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Text style={styles.backButtonText}>‹</Text>
-            </TouchableOpacity>
-            <View style={styles.headerInfo}>
-              {/* <Text style={styles.storyName} numberOfLines={1}>
-                {story?.caption ?? storyName}
-              </Text> */}
-              <Text style={styles.chapterTitle} numberOfLines={1}>
-                {chapter ? chapter.name : `Chương ${chapterNumber}`}
-              </Text>
-            </View>
-            {/* <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={loadChapter}
-            >
-              <Text style={styles.refreshButtonText}>↻</Text>
-            </TouchableOpacity> */}
+      {/* <ImageBackground
+        source={require('../paperboard-texture.jpg')}
+        resizeMode="repeat"
+      > */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>‹</Text>
+        </TouchableOpacity>
+        <View style={styles.headerInfo}>
+          <Text style={styles.chapterTitle} numberOfLines={1}>
+            {currentChapter ? currentChapter.name : `Chương ${chapterNumber}`}
+          </Text>
         </View>
-      </ImageBackground>
+        <View style={styles.chapterIndicator}>
+          <Text style={styles.chapterIndicatorText}>
+            {currentChapterIndex + 1}/{story?.listChapter.length ?? 0}
+          </Text>
+        </View>
+      </View>
+      {/* </ImageBackground> */}
 
-      <ScrollView
-        style={styles.contentContainer}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      <FlatList
+        ref={flatListRef}
+        data={chapterData}
+        renderItem={renderChapterPage}
+        keyExtractor={item => `chapter-${item.chapter.id}`}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
         bounces={false}
-        alwaysBounceVertical={false}
-        onScroll={handleScroll}
-        onScrollEndDrag={handleScrollEndDrag}
-        scrollEventThrottle={16}
-        ref={scrollViewRef}
-        onContentSizeChange={handleContentSizeChange}
-      >
-        {content.split('\n').map((paragraph, paraIndex) => (
-          <ImageBackground
-            key={paraIndex}
-            source={require('../paperboard-texture.jpg')}
-            style={styles.paragraphContainer}
-            resizeMode="repeat"
-          >
-            <View style={styles.paragraphContent}>
-              <Text style={styles.contentText}>{paragraph}</Text>
-            </View>
-          </ImageBackground>
-        ))}
-        <ImageBackground
-            source={require('../paperboard-texture.jpg')}
-            style={[styles.bottomSpacer, { height: bottomSpacerHeight }]}
-            resizeMode="repeat"
-          >
-          </ImageBackground>
-      </ScrollView>
-
+        onViewableItemsChanged={handleViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
+        getItemLayout={getItemLayout}
+        initialScrollIndex={initialScrollIndex}
+        initialNumToRender={1}
+        maxToRenderPerBatch={2}
+        windowSize={3}
+        removeClippedSubviews={true}
+        onScrollToIndexFailed={handleScrollToIndexFailed}
+        style={styles.flatList}
+      />
     </SafeAreaView>
   );
 }
 
+// Background color matching the paperboard texture for seamless transitions
+const PAPER_BG_COLOR = '#b7ac97';
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: PAPER_BG_COLOR,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: PAPER_BG_COLOR,
   },
   loadingText: {
     marginTop: 10,
@@ -332,54 +414,62 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    // paddingHorizontal: 15,
-    // paddingVertical: 8,
-    // backgroundColor: 'rgba(248, 249, 250, 0.95)',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: '#a99c82',
     paddingHorizontal: 15,
     paddingVertical: 8,
   },
-  backButton: {
-    // padding: 5,
-  },
+  backButton: {},
   backButtonText: {
     fontSize: 20,
-    // color: '#007AFF',
     fontWeight: '800',
   },
   headerInfo: {
     flex: 1,
     marginHorizontal: 15,
   },
-  storyName: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
-  },
   chapterTitle: {
     fontSize: 12,
     fontWeight: '600',
     color: '#333',
   },
-  refreshButton: {
-    padding: 5,
+  chapterIndicator: {
+    // backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  refreshButtonText: {
-    fontSize: 18,
-    color: '#007AFF',
+  chapterIndicatorText: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '500',
   },
-  contentContainer: {
+  flatList: {
     flex: 1,
   },
-  scrollContent: {
-    padding: 0,
+  chapterPage: {
+    width: SCREEN_WIDTH,
+    flex: 1,
   },
-  paragraphContainer: {
-    minHeight: 60,
+  chapterLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: PAPER_BG_COLOR,
+  },
+  chapterScrollView: {
+    flex: 1,
+    backgroundColor: PAPER_BG_COLOR,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  contentBackground: {
+    minHeight: '100%',
   },
   paragraphContent: {
-    padding: 15
+    padding: 15,
+    paddingTop: 20,
   },
   contentText: {
     fontSize: 18,

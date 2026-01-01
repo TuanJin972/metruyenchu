@@ -2,6 +2,12 @@
   "expo": {
     "name": "metruyenchu",
     "slug": "metruyenchu",
+    "scheme": "metruyenchu",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/logo.png",
@@ -29,14 +35,15 @@
     },
     "extra": {
       "eas": {
-        "projectId": "9ec10f66-3cc1-41e7-a591-ddd586b2f1e4"
+        "projectId": "582c8786-4354-4562-81f1-0632da556e49"
       }
     },
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/9ec10f66-3cc1-41e7-a591-ddd586b2f1e4"
-    }
+      "url": "https://u.expo.dev/582c8786-4354-4562-81f1-0632da556e49"
+    },
+    "owner": "tuananh972"
   }
 }
