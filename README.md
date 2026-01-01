@@ -18,9 +18,8 @@ Run the command below and scan the QR Code with Expo Go on your mobile device
 
 ## 📱 Demo
 
-<video width="320" height="240" controls>
-  <source src="demo/demo.mp4" type="video/mp4">
-</video>
+https://github.com/user-attachments/assets/5dede03e-a467-4275-b4ea-e59478d90713
+
 
 ## 🤝 Contributing
 
