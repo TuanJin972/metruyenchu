@@ -6,6 +6,9 @@ import {
   StyleSheet,
   ActivityIndicator,
   TouchableOpacity,
+  TouchableWithoutFeedback,
+  Pressable,
+  useColorScheme,
   Alert,
   ImageBackground,
   NativeScrollEvent,
@@ -13,10 +16,12 @@ import {
   Dimensions,
   FlatList,
   ViewToken,
+  Modal,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ChapterCacheService } from '../services/chapterCacheService';
 import { LibraryService } from '../services/libraryService';
+import { ReaderFontId, ReaderSettingsService } from '../services/readerSettingsService';
 import { RootStackParamList, StoredChapter, StoredStoryFile } from '../types';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -28,6 +33,7 @@ interface ChapterData {
 }
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const gChapterListItemHeight = 70;
 
 /**
  * Individual chapter content component
@@ -39,12 +45,22 @@ const ChapterContent = React.memo(({
   pOnScrollPositionChange,
   pInitialScrollPosition,
   pBottomSpacerHeight,
+  pOnToggleSettings,
+  pFontFamily,
+  pBackgroundColor,
+  pContentTextColor,
+  pSecondaryTextColor,
 }: {
   pChapter: StoredChapter;
   pStoryName: string;
   pOnScrollPositionChange?: (pScrollY: number) => void;
   pInitialScrollPosition?: number;
   pBottomSpacerHeight: number;
+    pOnToggleSettings: () => void;
+    pFontFamily?: string;
+    pBackgroundColor: string;
+    pContentTextColor: string;
+    pSecondaryTextColor: string;
 }) => {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -112,9 +128,9 @@ const ChapterContent = React.memo(({
 
   if (loading) {
     return (
-      <View style={styles.chapterLoadingContainer}>
+      <View style={[styles.chapterLoadingContainer, { backgroundColor: pBackgroundColor }]}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Đang tải...</Text>
+        <Text style={[styles.loadingText, { color: pSecondaryTextColor }]}>Đang tải...</Text>
       </View>
     );
   }
@@ -122,7 +138,7 @@ const ChapterContent = React.memo(({
   return (
     <ScrollView
       ref={scrollViewRef}
-      style={styles.chapterScrollView}
+      style={[styles.chapterScrollView, { backgroundColor: pBackgroundColor }]}
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
       bounces={false}
@@ -138,10 +154,14 @@ const ChapterContent = React.memo(({
         style={styles.contentBackground}
         resizeMode="repeat"
       > */}
-      <View style={styles.paragraphContent}>
-        <Text style={styles.contentText}>{formattedContent}</Text>
-      </View>
-      <View style={[styles.bottomSpacer, { height: pBottomSpacerHeight }]} />
+      <Pressable onPress={pOnToggleSettings}>
+        <View style={styles.paragraphContent}>
+          <Text style={[styles.contentText, { fontFamily: pFontFamily, color: pContentTextColor }]}>
+            {formattedContent}
+          </Text>
+        </View>
+        <View style={[styles.bottomSpacer, { height: pBottomSpacerHeight }]} />
+      </Pressable>
       {/* </ImageBackground> */}
     </ScrollView>
   );
@@ -149,14 +169,30 @@ const ChapterContent = React.memo(({
 
 export default function ChapterReaderScreen({ navigation, route }: ChapterReaderScreenProps) {
   const { storyName, chapterNumber } = route.params;
+
+  // Auto dark mode based on system theme.
+  const gColorScheme = useColorScheme();
+  const gIsDarkMode = gColorScheme === 'dark';
+  const gReaderBackgroundColor = gIsDarkMode ? '#000' : PAPER_BG_COLOR;
+  const gReaderContentTextColor = gIsDarkMode ? '#fff' : '#2c1810';
+  const gReaderSecondaryTextColor = gIsDarkMode ? '#c7c7c7' : '#666';
+  const gReaderHeaderBorderColor = gIsDarkMode ? '#222' : '#a99c82';
+  const gReaderHeaderTextColor = gIsDarkMode ? '#fff' : '#333';
+
   const [story, setStory] = useState<StoredStoryFile | null>(null);
   const [currentChapterIndex, setCurrentChapterIndex] = useState<number>(-1);
   const [initialLoading, setInitialLoading] = useState(true);
   const [savedScrollPosition, setSavedScrollPosition] = useState<number>(0);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [chapterListVisible, setChapterListVisible] = useState(false);
+  const [selectedFontId, setSelectedFontId] = useState<ReaderFontId>(ReaderSettingsService.DEFAULT_FONT_ID);
+  const [fontsLoaded, setFontsLoaded] = useState(false);
 
   const flatListRef = useRef<FlatList<ChapterData>>(null);
+  const chapterListRef = useRef<FlatList<StoredChapter>>(null);
   const saveScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedChapterRef = useRef<number>(-1);
+  const gIsProgrammaticJumpRef = useRef(false);
 
   const bottomSpacerHeight = useMemo(() => (SCREEN_HEIGHT * 1) / 2, []);
 
@@ -234,6 +270,9 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
   // Handle chapter change when scrolling between chapters
   const handleViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (gIsProgrammaticJumpRef.current) {
+        return;
+      }
       if (viewableItems.length > 0) {
         const visibleItem = viewableItems[0];
         const newChapterData = visibleItem.item as ChapterData;
@@ -300,11 +339,26 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
             pOnScrollPositionChange={isCurrentChapter ? saveScrollPosition : undefined}
             pInitialScrollPosition={isCurrentChapter ? savedScrollPosition : undefined}
             pBottomSpacerHeight={bottomSpacerHeight}
+            pOnToggleSettings={() => setSettingsVisible(true)}
+            pFontFamily={ReaderSettingsService.getFontFamily(selectedFontId)}
+            pBackgroundColor={gReaderBackgroundColor}
+            pContentTextColor={gReaderContentTextColor}
+            pSecondaryTextColor={gReaderSecondaryTextColor}
           />
         </View>
       );
     },
-    [currentChapterIndex, storyName, saveScrollPosition, savedScrollPosition, bottomSpacerHeight]
+    [
+      currentChapterIndex,
+      storyName,
+      saveScrollPosition,
+      savedScrollPosition,
+      bottomSpacerHeight,
+      selectedFontId,
+      gReaderBackgroundColor,
+      gReaderContentTextColor,
+      gReaderSecondaryTextColor,
+    ]
   );
 
   const getItemLayout = useCallback(
@@ -333,35 +387,122 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
     []
   );
 
+  const getChapterListItemLayout = useCallback(
+    (_: ArrayLike<StoredChapter> | null | undefined, pIndex: number) => ({
+      length: gChapterListItemHeight,
+      offset: gChapterListItemHeight * pIndex,
+      index: pIndex,
+    }),
+    []
+  );
+
+  const handleOpenChapterList = useCallback(() => {
+    setChapterListVisible(true);
+    setSettingsVisible(false);
+  }, []);
+
+  const handleCloseChapterList = useCallback(() => {
+    setChapterListVisible(false);
+  }, []);
+
+  const handleSelectChapter = useCallback(
+    (pChapter: StoredChapter, pIndex: number) => {
+      if (!story) return;
+      gIsProgrammaticJumpRef.current = true;
+      setChapterListVisible(false);
+      setSettingsVisible(false);
+      setSavedScrollPosition(0);
+      setCurrentChapterIndex(pIndex);
+      lastSavedChapterRef.current = pChapter.id;
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToIndex({ index: pIndex, animated: false });
+        gIsProgrammaticJumpRef.current = false;
+      });
+      void LibraryService.updateLastRead(storyName, pChapter.id);
+      void ChapterCacheService.preloadChaptersAround(storyName, pChapter.id, story.listChapter);
+    },
+    [story, storyName]
+  );
+
+  const renderChapterListItem = useCallback(
+    ({ item, index }: { item: StoredChapter; index: number }) => {
+      const isActive = currentChapter?.id === item.id;
+      return (
+        <TouchableOpacity
+          style={[styles.chapterListItem, isActive && styles.chapterListItemActive]}
+          onPress={() => handleSelectChapter(item, index)}
+        >
+          <View style={styles.chapterListRow}>
+            <Text style={[styles.chapterListNumber, isActive && styles.chapterListNumberActive]}>{item.id}</Text>
+            <Text
+              style={[styles.chapterListName, isActive && styles.chapterListNameActive]}
+              numberOfLines={2}
+            >
+              {item.name}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [currentChapter?.id, handleSelectChapter]
+  );
+
+  const handleFontSelect = useCallback(async (pFontId: ReaderFontId) => {
+    try {
+      setSelectedFontId(pFontId);
+      await ReaderSettingsService.setFontId(pFontId);
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể lưu font chữ này. Vui lòng thử lại.');
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadFont = async () => {
+      try {
+        await ReaderSettingsService.ensureFontsLoaded();
+        setFontsLoaded(true);
+
+        const gSavedFontId = await ReaderSettingsService.getFontId();
+        setSelectedFontId(gSavedFontId);
+      } catch (error) {
+        console.warn('Unable to load saved font', error);
+      }
+    };
+
+    void loadFont();
+  }, []);
+
   if (initialLoading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
+      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: gReaderBackgroundColor }]}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Đang tải nội dung...</Text>
+        <Text style={[styles.loadingText, { color: gReaderSecondaryTextColor }]}>
+          Đang tải nội dung...
+        </Text>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: gReaderBackgroundColor }]}>
       {/* <ImageBackground
         source={require('../paperboard-texture.jpg')}
         resizeMode="repeat"
       > */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: gReaderHeaderBorderColor }]}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Text style={styles.backButtonText}>‹</Text>
+          <Text style={[styles.backButtonText, { color: gReaderHeaderTextColor }]}>‹</Text>
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={styles.chapterTitle} numberOfLines={1}>
+          <Text style={[styles.chapterTitle, { color: gReaderHeaderTextColor }]} numberOfLines={1}>
             {currentChapter ? currentChapter.name : `Chương ${chapterNumber}`}
           </Text>
         </View>
         <View style={styles.chapterIndicator}>
-          <Text style={styles.chapterIndicatorText}>
+          <Text style={[styles.chapterIndicatorText, { color: gReaderSecondaryTextColor }]}>
             {currentChapterIndex + 1}/{story?.listChapter.length ?? 0}
           </Text>
         </View>
@@ -371,6 +512,7 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
       <FlatList
         ref={flatListRef}
         data={chapterData}
+        extraData={{ selectedFontId, fontsLoaded }}
         renderItem={renderChapterPage}
         keyExtractor={item => `chapter-${item.chapter.id}`}
         horizontal
@@ -388,6 +530,82 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
         onScrollToIndexFailed={handleScrollToIndexFailed}
         style={styles.flatList}
       />
+
+      <Modal visible={settingsVisible} transparent animationType="slide" onRequestClose={() => setSettingsVisible(false)}>
+        <TouchableWithoutFeedback onPress={() => setSettingsVisible(false)}>
+          <View style={styles.settingsOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.settingsSheet}>
+                <View style={styles.settingsHandle} />
+                <Text style={styles.settingsTitle}>Settings</Text>
+
+                <TouchableOpacity style={styles.settingsButton} onPress={handleOpenChapterList}>
+                  <Text style={styles.settingsButtonText}>Danh sách chương</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.settingsSectionTitle}>Font chữ</Text>
+                <View style={styles.fontList}>
+                  {ReaderSettingsService.AVAILABLE_FONTS.map(font => (
+                    <TouchableOpacity
+                      key={font.id}
+                      style={[
+                        styles.fontOption,
+                        selectedFontId === font.id && styles.fontOptionActive,
+                      ]}
+                      onPress={() => handleFontSelect(font.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.fontOptionText,
+                          selectedFontId === font.id && styles.fontOptionTextActive,
+                          { fontFamily: font.fontFamily },
+                        ]}
+                      >
+                        {font.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      <Modal visible={chapterListVisible} animationType="slide" onRequestClose={handleCloseChapterList}>
+        <SafeAreaView style={styles.chapterListModal}>
+          <View style={styles.chapterListHeader}>
+            <Text style={styles.chapterListTitle}>Danh sách chương</Text>
+            <TouchableOpacity onPress={handleCloseChapterList}>
+              <Text style={styles.chapterListClose}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+          {story ? (
+            <FlatList
+              ref={chapterListRef}
+              data={story.listChapter}
+              keyExtractor={item => `chapter-modal-${item.id}`}
+              renderItem={renderChapterListItem}
+              showsVerticalScrollIndicator={false}
+              initialScrollIndex={currentChapterIndex >= 0 ? currentChapterIndex : undefined}
+              getItemLayout={getChapterListItemLayout}
+              initialNumToRender={18}
+              maxToRenderPerBatch={24}
+              windowSize={9}
+              removeClippedSubviews={true}
+              onScrollToIndexFailed={({ index }) => {
+                setTimeout(() => {
+                  chapterListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.3 });
+                }, 100);
+              }}
+            />
+          ) : (
+            <View style={styles.chapterListEmpty}>
+              <Text style={styles.chapterListEmptyText}>Không có danh sách chương.</Text>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -481,5 +699,141 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     width: '100%',
+  },
+  settingsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    justifyContent: 'flex-end',
+  },
+  settingsSheet: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 24,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  settingsHandle: {
+    width: 48,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#e0e0e0',
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  settingsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  settingsSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  settingsButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  settingsButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  fontList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  fontOption: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  fontOptionActive: {
+    backgroundColor: '#e8f0ff',
+    borderColor: '#007AFF',
+  },
+  fontOptionText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  fontOptionTextActive: {
+    color: '#007AFF',
+    fontWeight: '700',
+  },
+  chapterListModal: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  chapterListHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  chapterListTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  chapterListClose: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  chapterListItem: {
+    height: gChapterListItemHeight,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f5f5f5',
+  },
+  chapterListItemActive: {
+    backgroundColor: '#e8f0ff',
+  },
+  chapterListRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
+  },
+  chapterListNumber: {
+    width: 52,
+    fontSize: 14,
+    paddingRight: 12,
+    color: '#333',
+  },
+  chapterListNumberActive: {
+    color: '#007AFF',
+    fontWeight: '700',
+  },
+  chapterListName: {
+    flex: 1,
+    flexShrink: 1,
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
+  },
+  chapterListNameActive: {
+    color: '#007AFF',
+    fontWeight: '700',
+  },
+  chapterListEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chapterListEmptyText: {
+    fontSize: 15,
+    color: '#666',
   },
 });

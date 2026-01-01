@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -6,10 +6,16 @@ import HomeScreen from './screens/HomeScreen';
 import StoryDetailScreen from './screens/StoryDetailScreen';
 import ChapterReaderScreen from './screens/ChapterReaderScreen';
 import { RootStackParamList } from './types';
+import { ReaderSettingsService } from './services/readerSettingsService';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
+  useEffect(() => {
+    // Preload reader fonts once to avoid flicker when opening the reader.
+    void ReaderSettingsService.ensureFontsLoaded();
+  }, []);
+
   return (
     <NavigationContainer>
       <StatusBar style="auto" />

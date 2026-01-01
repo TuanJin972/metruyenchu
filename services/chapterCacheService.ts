@@ -16,6 +16,7 @@ interface CachedChapter {
 class ChapterCacheServiceClass {
   private gCache: Map<string, CachedChapter> = new Map();
   private gLoadingPromises: Map<string, Promise<string>> = new Map();
+  private gPreloadSessionId = 0;
   private static readonly PRELOAD_AHEAD = 5; // Number of chapters to preload ahead
   private static readonly KEEP_BEHIND = 5; // Number of previous chapters to keep
 
@@ -95,6 +96,7 @@ class ChapterCacheServiceClass {
     pCurrentChapterId: number,
     pChapterList: StoredChapter[]
   ): Promise<void> {
+    const gCurrentSessionId = ++this.gPreloadSessionId;
     const currentIndex = pChapterList.findIndex(ch => ch.id === pCurrentChapterId);
     if (currentIndex < 0) return;
 
@@ -118,8 +120,11 @@ class ChapterCacheServiceClass {
       chaptersToPreload.push(pChapterList[i]);
     }
 
-    // Preload in background (don't await all at once to avoid blocking)
+    // Preload sequentially to avoid spamming the server when users jump chapters quickly.
     for (const chapter of chaptersToPreload) {
+      if (gCurrentSessionId !== this.gPreloadSessionId) {
+        return;
+      }
       const cacheKey = this.getCacheKey(pStoryName, chapter.id);
 
       // Skip if already cached or loading
@@ -127,16 +132,20 @@ class ChapterCacheServiceClass {
         continue;
       }
 
-      // Load in background with a small delay to avoid overwhelming the server
-      this.loadChapter(pStoryName, chapter.id, chapter.url).catch(err => {
-        console.warn(`Background preload failed for chapter ${chapter.id}:`, err);
-      });
+      try {
+        await this.loadChapter(pStoryName, chapter.id, chapter.url);
+      } catch (error) {
+        console.warn(`Background preload failed for chapter ${chapter.id}:`, error);
+      }
 
       // Small delay between requests
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     // Clean up chapters outside the cache window
+    if (gCurrentSessionId !== this.gPreloadSessionId) {
+      return;
+    }
     this.cleanupCache(pStoryName, pChapterList, currentIndex);
   }
 
