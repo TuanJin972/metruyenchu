@@ -173,11 +173,11 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
   // Auto dark mode based on system theme.
   const gColorScheme = useColorScheme();
   const gIsDarkMode = gColorScheme === 'dark';
-  const gReaderBackgroundColor = gIsDarkMode ? '#000' : PAPER_BG_COLOR;
-  const gReaderContentTextColor = gIsDarkMode ? '#fff' : '#2c1810';
-  const gReaderSecondaryTextColor = gIsDarkMode ? '#c7c7c7' : '#666';
-  const gReaderHeaderBorderColor = gIsDarkMode ? '#222' : '#a99c82';
-  const gReaderHeaderTextColor = gIsDarkMode ? '#fff' : '#333';
+  const gReaderBackgroundColor = gIsDarkMode ? '#272729' : PAPER_BG_COLOR;
+  const gReaderContentTextColor = gIsDarkMode ? '#8c8c8e' : '#2c1810';
+  const gReaderSecondaryTextColor = gIsDarkMode ? '#8c8c8e' : '#666';
+  const gReaderHeaderBorderColor = gIsDarkMode ? '#272729' : '#a99c82';
+  const gReaderHeaderTextColor = gIsDarkMode ? '#8c8c8e' : '#333';
 
   const [story, setStory] = useState<StoredStoryFile | null>(null);
   const [currentChapterIndex, setCurrentChapterIndex] = useState<number>(-1);
@@ -429,13 +429,22 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
       const isActive = currentChapter?.id === item.id;
       return (
         <TouchableOpacity
-          style={[styles.chapterListItem, isActive && styles.chapterListItemActive]}
+          style={[
+            gIsDarkMode ? styles.chapterListItemDark : styles.chapterListItem,
+            isActive && (gIsDarkMode ? styles.chapterListItemActiveDark : styles.chapterListItemActive)
+          ]}
           onPress={() => handleSelectChapter(item, index)}
         >
           <View style={styles.chapterListRow}>
-            <Text style={[styles.chapterListNumber, isActive && styles.chapterListNumberActive]}>{item.id}</Text>
+            <Text style={[
+              gIsDarkMode ? styles.chapterListNumberDark : styles.chapterListNumber,
+              isActive && (gIsDarkMode ? styles.chapterListNumberActiveDark : styles.chapterListNumberActive)
+            ]}>{item.id}</Text>
             <Text
-              style={[styles.chapterListName, isActive && styles.chapterListNameActive]}
+              style={[
+                gIsDarkMode ? styles.chapterListNameDark : styles.chapterListName,
+                isActive && (gIsDarkMode ? styles.chapterListNameActiveDark : styles.chapterListNameActive)
+              ]}
               numberOfLines={2}
             >
               {item.name}
@@ -444,7 +453,7 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
         </TouchableOpacity>
       );
     },
-    [currentChapter?.id, handleSelectChapter]
+    [currentChapter?.id, handleSelectChapter, gIsDarkMode]
   );
 
   const handleFontSelect = useCallback(async (pFontId: ReaderFontId) => {
@@ -489,7 +498,7 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
         source={require('../paperboard-texture.jpg')}
         resizeMode="repeat"
       > */}
-      <View style={[styles.header, { borderBottomColor: gReaderHeaderBorderColor }]}>
+      <View style={[styles.header, { borderBottomColor: gReaderHeaderBorderColor, backgroundColor: gReaderBackgroundColor }]}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
@@ -533,31 +542,34 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
 
       <Modal visible={settingsVisible} transparent animationType="slide" onRequestClose={() => setSettingsVisible(false)}>
         <TouchableWithoutFeedback onPress={() => setSettingsVisible(false)}>
-          <View style={styles.settingsOverlay}>
+          <View style={[styles.settingsOverlay, gIsDarkMode && { backgroundColor: 'rgba(0, 0, 0, 0.6)' }]}>
             <TouchableWithoutFeedback>
-              <View style={styles.settingsSheet}>
-                <View style={styles.settingsHandle} />
-                <Text style={styles.settingsTitle}>Settings</Text>
+              <View style={[styles.settingsSheet, { backgroundColor: gReaderBackgroundColor }]}>
+                <View style={[styles.settingsHandle, { backgroundColor: gIsDarkMode ? '#555' : '#e0e0e0' }]} />
+                <Text style={[styles.settingsTitle, { color: gReaderHeaderTextColor }]}>Settings</Text>
 
-                <TouchableOpacity style={styles.settingsButton} onPress={handleOpenChapterList}>
-                  <Text style={styles.settingsButtonText}>Danh sách chương</Text>
+                <TouchableOpacity
+                  style={[styles.settingsButton, { backgroundColor: '#007AFF' }]}
+                  onPress={handleOpenChapterList}
+                >
+                  <Text style={[styles.settingsButtonText, { color: '#fff' }]}>Danh sách chương</Text>
                 </TouchableOpacity>
 
-                <Text style={styles.settingsSectionTitle}>Font chữ</Text>
+                <Text style={[styles.settingsSectionTitle, { color: gReaderHeaderTextColor }]}>Font chữ</Text>
                 <View style={styles.fontList}>
                   {ReaderSettingsService.AVAILABLE_FONTS.map(font => (
                     <TouchableOpacity
                       key={font.id}
                       style={[
-                        styles.fontOption,
-                        selectedFontId === font.id && styles.fontOptionActive,
+                        gIsDarkMode ? styles.fontOptionDark : styles.fontOption,
+                        selectedFontId === font.id && (gIsDarkMode ? styles.fontOptionActiveDark : styles.fontOptionActive)
                       ]}
                       onPress={() => handleFontSelect(font.id)}
                     >
                       <Text
                         style={[
-                          styles.fontOptionText,
-                          selectedFontId === font.id && styles.fontOptionTextActive,
+                          gIsDarkMode ? styles.fontOptionTextDark : styles.fontOptionText,
+                          selectedFontId === font.id && (gIsDarkMode ? styles.fontOptionTextActiveDark : styles.fontOptionTextActive),
                           { fontFamily: font.fontFamily },
                         ]}
                       >
@@ -573,11 +585,11 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
       </Modal>
 
       <Modal visible={chapterListVisible} animationType="slide" onRequestClose={handleCloseChapterList}>
-        <SafeAreaView style={styles.chapterListModal}>
-          <View style={styles.chapterListHeader}>
-            <Text style={styles.chapterListTitle}>Danh sách chương</Text>
+        <SafeAreaView style={[styles.chapterListModal, { backgroundColor: gReaderBackgroundColor }]}>
+          <View style={[styles.chapterListHeader, { borderBottomColor: gReaderHeaderBorderColor }]}>
+            <Text style={[styles.chapterListTitle, { color: gReaderHeaderTextColor }]}>Danh sách chương</Text>
             <TouchableOpacity onPress={handleCloseChapterList}>
-              <Text style={styles.chapterListClose}>Đóng</Text>
+              <Text style={[styles.chapterListClose, { color: '#007AFF' }]}>Đóng</Text>
             </TouchableOpacity>
           </View>
           {story ? (
@@ -601,7 +613,7 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
             />
           ) : (
             <View style={styles.chapterListEmpty}>
-              <Text style={styles.chapterListEmptyText}>Không có danh sách chương.</Text>
+              <Text style={gIsDarkMode ? styles.chapterListEmptyTextDark : styles.chapterListEmptyText}>Không có danh sách chương.</Text>
             </View>
           )}
         </SafeAreaView>
@@ -835,5 +847,63 @@ const styles = StyleSheet.create({
   chapterListEmptyText: {
     fontSize: 15,
     color: '#666',
+  },
+  chapterListEmptyTextDark: {
+    fontSize: 15,
+    color: '#8c8c8e',
+  },
+
+  // Dark mode styles for chapter list
+  chapterListItemDark: {
+    height: gChapterListItemHeight,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  chapterListItemActiveDark: {
+    backgroundColor: '#333',
+  },
+  chapterListNumberDark: {
+    width: 52,
+    fontSize: 14,
+    paddingRight: 12,
+    color: '#8c8c8e',
+  },
+  chapterListNumberActiveDark: {
+    color: '#007AFF',
+    fontWeight: '700',
+  },
+  chapterListNameDark: {
+    flex: 1,
+    flexShrink: 1,
+    fontSize: 14,
+    color: '#8c8c8e',
+    lineHeight: 20,
+  },
+  chapterListNameActiveDark: {
+    color: '#007AFF',
+    fontWeight: '700',
+  },
+
+  // Dark mode styles for font options
+  fontOptionDark: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#555',
+  },
+  fontOptionActiveDark: {
+    backgroundColor: '#333',
+    borderColor: '#007AFF',
+  },
+  fontOptionTextDark: {
+    fontSize: 14,
+    color: '#8c8c8e',
+  },
+  fontOptionTextActiveDark: {
+    color: '#007AFF',
+    fontWeight: '700',
   },
 });
