@@ -1,8 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { StoredStoryFile, StoredStoryIndexItem } from '../types';
+import { StoredStoryFile, StoredStoryIndexItem, StorySource } from '../types';
 import { StoryService } from './storyService';
 
 const SOURCE_BASE_URL = 'https://metruyenchu.com.vn';
+const TIEM_BASE_URL = 'https://www.tiemtruyenchu.com';
 
 const LIBRARY_DIR = `${FileSystem.documentDirectory ?? ''}metruyenchu/`;
 const STORIES_DIR = `${LIBRARY_DIR}stories/`;
@@ -17,19 +18,41 @@ function safeFileName(pValue: string): string {
   return normalizeStoryName(pValue).replace(/[^a-z0-9-_]+/g, '_');
 }
 
+/**
+ * Detect story source from input URL or slug.
+ */
+export function detectStorySource(pInput: string): StorySource {
+  const input = pInput.trim().toLowerCase();
+  if (input.includes('tiemtruyenchu.com')) return 'tiemtruyenchu';
+  return 'metruyenchu';
+}
+
+/**
+ * Parse tiemtruyenchu.com numeric story ID from URL.
+ * Returns '' if not a valid tiemtruyenchu URL.
+ */
+function parseTiemTruyenChuId(pInput: string): string {
+  const match = pInput.match(/tiemtruyenchu\.com\/truyen\/(\d+)/i);
+  return match?.[1] ?? '';
+}
+
 export function parseStoryNameFromInput(pInput: string): string {
   const input = pInput.trim();
   if (!input) return '';
 
-  // 1) Full URL (preferred)
+  // 1) TiemTruyenChu URL → prefix "ttc-{id}"
+  const tiemId = parseTiemTruyenChuId(input);
+  if (tiemId) return `ttc-${tiemId}`;
+
+  // 2) MeTruyenChu full URL
   const urlMatch = input.match(/https?:\/\/[^/]*metruyenchu\.com\.vn\/([^/?#]+)/i);
   if (urlMatch?.[1]) return normalizeStoryName(urlMatch[1]);
 
-  // 2) Path-like input: "/slug" or "slug/chuong-1..."
+  // 3) Path-like input: "/slug" or "slug/chuong-1..."
   const pathMatch = input.match(/^\/?([^/?#]+)(?:[/?#]|$)/);
   if (pathMatch?.[1]) return normalizeStoryName(pathMatch[1]);
 
-  // 3) Raw slug
+  // 4) Raw slug
   return normalizeStoryName(input);
 }
 
@@ -98,6 +121,7 @@ export class LibraryService {
   static async addStoryFromUrl(pInput: string): Promise<StoredStoryIndexItem> {
     await ensureLibraryDirs();
 
+    const source = detectStorySource(pInput);
     const storyName = parseStoryNameFromInput(pInput);
     if (!storyName) {
       throw new Error('Vui lòng nhập link truyện hợp lệ.');
@@ -110,10 +134,20 @@ export class LibraryService {
       throw new Error('Truyện này đã được thêm vào thư viện rồi.');
     }
 
-    const canonicalUrl = `${SOURCE_BASE_URL}/${storyName}`;
     const nowIso = new Date().toISOString();
 
-    const story = await StoryService.getStoryChapters(storyName);
+    // Fetch story data from the appropriate source
+    let story;
+    let canonicalUrl: string;
+
+    if (source === 'tiemtruyenchu') {
+      const tiemId = storyName.replace('ttc-', '');
+      story = await StoryService.getTiemTruyenChuStoryChapters(tiemId);
+      canonicalUrl = `${TIEM_BASE_URL}/truyen/${tiemId}`;
+    } else {
+      story = await StoryService.getStoryChapters(storyName);
+      canonicalUrl = `${SOURCE_BASE_URL}/${storyName}`;
+    }
 
     const listChapter = story.chapters.map((ch, index) => ({
       id: index + 1, // Use 1-based index instead of ch.number to ensure uniqueness
@@ -128,6 +162,7 @@ export class LibraryService {
       caption: story.name,
       description: story.description,
       image: story.image,
+      source,
       listChapter,
       lastRead: listChapter.length > 0 ? 1 : 0,
       createdAt: nowIso,
@@ -144,6 +179,7 @@ export class LibraryService {
       url: storedStory.url,
       caption: storedStory.caption,
       image: storedStory.image,
+      source,
       lastRead: storedStory.lastRead,
       totalChapters: storedStory.listChapter.length,
       updatedAt: storedStory.updatedAt,
@@ -168,8 +204,20 @@ export class LibraryService {
     const storyName = normalizeStoryName(pStoryName);
     const existing = await this.getStory(storyName);
 
+    // Detect source from existing data or story name prefix
+    const source: StorySource = existing.source
+      ?? (storyName.startsWith('ttc-') ? 'tiemtruyenchu' : 'metruyenchu');
+
     const nowIso = new Date().toISOString();
-    const refreshed = await StoryService.getStoryChapters(storyName);
+
+    // Fetch refreshed data from the correct source
+    let refreshed;
+    if (source === 'tiemtruyenchu') {
+      const tiemId = storyName.replace('ttc-', '');
+      refreshed = await StoryService.getTiemTruyenChuStoryChapters(tiemId);
+    } else {
+      refreshed = await StoryService.getStoryChapters(storyName);
+    }
 
     const listChapter = refreshed.chapters.map((ch, index) => ({
       id: index + 1, // Use 1-based index instead of ch.number to ensure uniqueness
@@ -189,6 +237,7 @@ export class LibraryService {
       caption: refreshed.name,
       description: refreshed.description,
       image: refreshed.image ?? existing.image,
+      source,
       listChapter,
       lastRead: nextLastRead,
       createdAt: existing.createdAt,
@@ -205,6 +254,7 @@ export class LibraryService {
       url: nextStory.url,
       caption: nextStory.caption,
       image: nextStory.image,
+      source,
       lastRead: nextStory.lastRead,
       totalChapters: nextStory.listChapter.length,
       updatedAt: nextStory.updatedAt,

@@ -72,7 +72,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
     <View>
       <View style={styles.header}>
         <Text style={styles.title}>Thư viện truyện</Text>
-        <Text style={styles.subtitle}>Thêm truyện từ link metruyenchu.com.vn</Text>
+        <Text style={styles.subtitle}>Thêm truyện từ metruyenchu.com.vn hoặc tiemtruyenchu.com</Text>
       </View>
 
       <View style={styles.inputContainer}>
@@ -81,12 +81,12 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
           style={styles.input}
           value={storyUrl}
           onChangeText={setStoryUrl}
-          placeholder="Ví dụ: https://metruyenchu.com.vn/mat-the-de-nhat-ngoan-nhan"
+          placeholder="Ví dụ: metruyenchu.com.vn/... hoặc tiemtruyenchu.com/truyen/390"
           placeholderTextColor="#999"
           autoCapitalize="none"
           autoCorrect={false}
         />
-        <Text style={styles.hint}>Bạn có thể dán link hoặc nhập slug (mat-the-de-nhat-ngoan-nhan)</Text>
+        <Text style={styles.hint}>Dán link từ metruyenchu.com.vn hoặc tiemtruyenchu.com</Text>
       </View>
 
       <TouchableOpacity

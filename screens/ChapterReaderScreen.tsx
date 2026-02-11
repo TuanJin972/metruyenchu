@@ -542,9 +542,9 @@ export default function ChapterReaderScreen({ navigation, route }: ChapterReader
 
       <Modal visible={settingsVisible} transparent animationType="slide" onRequestClose={() => setSettingsVisible(false)}>
         <TouchableWithoutFeedback onPress={() => setSettingsVisible(false)}>
-          <View style={[styles.settingsOverlay, gIsDarkMode && { backgroundColor: 'rgba(0, 0, 0, 0.6)' }]}>
+          <View style={[styles.settingsOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.4)' }]}>
             <TouchableWithoutFeedback>
-              <View style={[styles.settingsSheet, { backgroundColor: gReaderBackgroundColor }]}>
+              <View style={[styles.settingsSheet, { backgroundColor: '#fff' }]}>
                 <View style={[styles.settingsHandle, { backgroundColor: gIsDarkMode ? '#555' : '#e0e0e0' }]} />
                 <Text style={[styles.settingsTitle, { color: gReaderHeaderTextColor }]}>Settings</Text>
 

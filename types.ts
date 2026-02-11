@@ -34,6 +34,9 @@ export interface StoredChapter {
   url: string;
 }
 
+/** Source site identifier */
+export type StorySource = 'metruyenchu' | 'tiemtruyenchu';
+
 export interface StoredStoryFile {
   name: string;
   'storing-id'?: number;
@@ -41,6 +44,8 @@ export interface StoredStoryFile {
   caption: string;
   description?: string;
   image?: string;
+  /** Source site for this story (defaults to 'metruyenchu' for backward compatibility) */
+  source?: StorySource;
   listChapter: StoredChapter[];
   lastRead: number;
   /** Scroll position (y offset) for the last read chapter */
@@ -55,6 +60,8 @@ export interface StoredStoryIndexItem {
   url: string;
   caption: string;
   image?: string;
+  /** Source site for this story (defaults to 'metruyenchu' for backward compatibility) */
+  source?: StorySource;
   lastRead: number;
   totalChapters: number;
   updatedAt: string;

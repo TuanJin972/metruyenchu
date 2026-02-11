@@ -2,6 +2,7 @@ import axios from 'axios';
 import { Chapter, Story } from '../types';
 
 const BASE_URL = 'https://metruyenchu.com.vn';
+const TIEM_BASE_URL = 'https://www.tiemtruyenchu.com';
 
 /* --------------------------------------------------
    Utils
@@ -445,6 +446,11 @@ export class StoryService {
   }
 
   static async getChapterContent(chapterUrl: string): Promise<string> {
+    // Route to TiemTruyenChu handler if URL matches
+    if (chapterUrl.includes('tiemtruyenchu.com')) {
+      return this.getTiemTruyenChuChapterContent(chapterUrl);
+    }
+
     try {
       console.log('Fetching chapter:', chapterUrl);
 
@@ -525,6 +531,184 @@ export class StoryService {
       return content || 'Không thể tải nội dung chương này.';
     } catch (error) {
       console.error('Error fetching chapter:', error);
+      throw new Error('Không thể tải nội dung chương.');
+    }
+  }
+
+  /* --------------------------------------------------
+     TiemTruyenChu.com support
+  -------------------------------------------------- */
+
+  /**
+   * Fetch story info and chapter list from tiemtruyenchu.com
+   * @param pStoryId - numeric story ID (e.g. "390")
+   */
+  static async getTiemTruyenChuStoryChapters(pStoryId: string): Promise<Story> {
+    try {
+      const url = `${TIEM_BASE_URL}/truyen/${pStoryId}`;
+      console.log('Fetching TiemTruyenChu story:', url);
+
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+
+      const html: string = response.data;
+
+      // --- Extract story title from <h2> -> <span class="align-middle"> ---
+      let storyTitle = `Truyện #${pStoryId}`;
+      const titleMatch = html.match(/<h2[^>]*class="[^"]*fw-bold[^"]*"[^>]*>[\s\S]*?<span[^>]*class="align-middle"[^>]*>([^<]*)<\/span>/i);
+      if (titleMatch?.[1]) {
+        storyTitle = decodeHtmlEntities(titleMatch[1].trim());
+      }
+      console.log('TiemTruyenChu title:', storyTitle);
+
+      // --- Extract story image from <img class="story-poster"> ---
+      let storyImage = '';
+      const imageMatch = html.match(/<img[^>]*class="story-poster"[^>]*src=["']([^"']*)["'][^>]*>/i)
+        || html.match(/<img[^>]*src=["']([^"']*)["'][^>]*class="story-poster"[^>]*>/i);
+      if (imageMatch?.[1]) {
+        storyImage = imageMatch[1].startsWith('http') ? imageMatch[1] : `${TIEM_BASE_URL}${imageMatch[1]}`;
+      }
+      console.log('TiemTruyenChu image:', storyImage);
+
+      // --- Extract description from <div class="content-text"> ---
+      let storyDescription = '';
+      const descMatch = html.match(/<div[^>]*class="content-text"[^>]*>([\s\S]*?)<\/div>/i);
+      if (descMatch?.[1]) {
+        storyDescription = decodeHtmlEntities(descMatch[1].trim());
+      }
+
+      // --- Extract chapters from <a class="chapter-item-link"> with data-chap-num ---
+      const chapters: Chapter[] = [];
+      const chapterRegex = /<a[^>]*href=["']([^"']*)["'][^>]*class="[^"]*chapter-item-link[^"]*"[^>]*data-chap-num=["'](\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+      let match;
+      while ((match = chapterRegex.exec(html)) !== null) {
+        const href = match[1];
+        const chapNum = parseInt(match[2]);
+        const title = decodeHtmlEntities(match[3].trim());
+
+        const fullUrl = href.startsWith('http') ? href : `${TIEM_BASE_URL}${href}`;
+        chapters.push({
+          id: `chuong-${chapNum}`,
+          title,
+          url: fullUrl,
+          number: chapNum,
+        });
+      }
+
+      // Sort chapters by data-chap-num
+      chapters.sort((a, b) => a.number - b.number);
+      console.log(`TiemTruyenChu: parsed ${chapters.length} chapters`);
+
+      const story: Story = {
+        id: `ttc-${pStoryId}`,
+        name: storyTitle,
+        chapters,
+        description: storyDescription || undefined,
+        url,
+        image: storyImage || undefined,
+      };
+
+      return story;
+    } catch (error) {
+      console.error('Error fetching TiemTruyenChu story:', error);
+      throw new Error('Không thể tải thông tin truyện từ TiemTruyenChu. Vui lòng kiểm tra link.');
+    }
+  }
+
+  /**
+   * Fetch chapter content from tiemtruyenchu.com
+   */
+  static async getTiemTruyenChuChapterContent(pChapterUrl: string): Promise<string> {
+    try {
+      console.log('Fetching TiemTruyenChu chapter:', pChapterUrl);
+
+      const response = await axios.get(pChapterUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+
+      const html: string = response.data;
+      let content = '';
+
+      // Try specific tiemtruyenchu patterns
+      const contentPatterns = [
+        // Look for div with id="chapter-content" or class containing "chapter-content"
+        /<div[^>]*id=["']chapter-content["'][^>]*>([\s\S]*?)<\/div>/i,
+        /<div[^>]*class="[^"]*chapter-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+        // Look for div with class="content-text" (same pattern as description)
+        /<div[^>]*class="[^"]*content-text[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+        // Look for div with class="reading-content"
+        /<div[^>]*class="[^"]*reading-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+        // Look for div with id="chapter-c" or class="chapter-c"
+        /<div[^>]*id=["']chapter-c["'][^>]*>([\s\S]*?)<\/div>/i,
+        /<div[^>]*class="[^"]*chapter-c[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+      ];
+
+      for (const pattern of contentPatterns) {
+        const match = html.match(pattern);
+        if (match?.[1] && match[1].trim().length > 100) {
+          content = match[1];
+          console.log('Found TiemTruyenChu content with pattern, length:', content.length);
+          break;
+        }
+      }
+
+      // Fallback: try to find main content area between navigation and footer
+      if (!content) {
+        // Look for the largest div that contains actual text content (paragraphs)
+        const divPattern = /<div[^>]*>([\s\S]*?)<\/div>/gi;
+        let bestContent = '';
+        let bestLength = 0;
+
+        let divMatch;
+        while ((divMatch = divPattern.exec(html)) !== null) {
+          const divContent = divMatch[1];
+          // Count text characters (excluding HTML tags)
+          const textOnly = divContent.replace(/<[^>]*>/g, '').trim();
+          if (textOnly.length > bestLength && textOnly.length > 200) {
+            bestLength = textOnly.length;
+            bestContent = divContent;
+          }
+        }
+
+        if (bestContent) {
+          content = bestContent;
+          console.log('Found TiemTruyenChu content via largest div, length:', content.length);
+        }
+      }
+
+      // Another fallback: extract paragraphs
+      if (!content) {
+        const paragraphRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
+        const paragraphs: string[] = [];
+        let paraMatch;
+
+        while ((paraMatch = paragraphRegex.exec(html)) !== null) {
+          const paraContent = paraMatch[1].trim();
+          if (paraContent && paraContent.length > 10) {
+            paragraphs.push(paraContent);
+          }
+        }
+
+        if (paragraphs.length > 0) {
+          content = paragraphs.join('\n\n');
+          console.log('Found TiemTruyenChu content via paragraphs, count:', paragraphs.length);
+        }
+      }
+
+      if (content) {
+        content = this.formatHtmlToText(content);
+        console.log('Formatted TiemTruyenChu content length:', content.length);
+      }
+
+      return content || 'Không thể tải nội dung chương này.';
+    } catch (error) {
+      console.error('Error fetching TiemTruyenChu chapter:', error);
       throw new Error('Không thể tải nội dung chương.');
     }
   }
